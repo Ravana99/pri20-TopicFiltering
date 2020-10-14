@@ -57,7 +57,7 @@ def traverse_folders(writer, corpus):
             if file != "MD5SUMS" and subdir != os.path.join(corpus, "codes") and subdir != os.path.join(corpus, "dtds"):
                 with open(os.path.join(subdir, file), "r") as f:
                     writer.add_document(id=file[:-10], content=f.read())
-                if (n_docs := n_docs + 1) >= docs_to_index:
+                if (n_docs := n_docs + 1) == docs_to_index:
                     return
 
 
