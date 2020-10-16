@@ -21,7 +21,9 @@ docs_to_index = 250                 # How many docs to add to index, set to None
 #######################################################################################################################
 
 
-def indexing(corpus):  # TODO: allow customization for text preprocessing using extra function arguments
+# By default, the writer will have 1GB (1024 MB) as the maximum memory for the indexing pool
+# However, the actual memory used will be higher than this value because of interpreter overhead (up to twice as much)
+def indexing(corpus, ram_limit=1024):  # TODO: allow customization for text preprocessing using extra function arguments
     start_time = time.time()
 
     # TODO: split content according to XML tags
@@ -34,7 +36,7 @@ def indexing(corpus):  # TODO: allow customization for text preprocessing using 
 
     # Create index in indexdir folder
     ix = create_in("indexdir", schema)
-    writer = ix.writer()
+    writer = ix.writer(limitmb=ram_limit)
     traverse_folders(writer, corpus)
     writer.commit()
 
@@ -61,6 +63,20 @@ def traverse_folders(writer, corpus):
                     return
 
 
+# Prints the entire index for debugging and manual analysis purposes
+def print_index(index):
+    with index.searcher() as searcher:
+        results = searcher.search(Every(), limit=None)
+        doc_ids = [r["id"] for r in results]
+        doc_ids.sort()
+        doc_ids = {i: doc_id for i, doc_id in enumerate(doc_ids)}
+        for word in searcher.lexicon("content"):
+            print(word.decode("utf-8") + ": ", end="")
+            for doc in searcher.postings("content", word).all_ids():
+                print(doc_ids[doc], end=" ")
+            print()
+
+
 def convert_filesize(size):
     suffixes = ("B", "KiB", "MiB", "GiB", "TiB")
     i = 0
@@ -74,6 +90,7 @@ def main():
     (ix, ix_time, ix_space) = indexing(corpus_dir)
     print(f"Time to build index: {round(ix_time, 3)}s")
     print(f"Disk space taken up by the index: {convert_filesize(ix_space)}")
+    # print("Whole index:"); print_index(ix)
 
     with ix.searcher() as searcher:
         results = searcher.search(Every(), limit=None)  # Returns every document
