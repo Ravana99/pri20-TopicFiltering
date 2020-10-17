@@ -1,7 +1,6 @@
 import os
 import shutil
 import time
-import re
 import math
 import xml.etree.ElementTree as et
 
@@ -9,11 +8,13 @@ from collections import Counter
 from whoosh import scoring
 from whoosh.index import create_in
 from whoosh.fields import *
+from whoosh.reading import TermNotFound
 
 # from whoosh.qparser import *       # to actually process queries
 # from whoosh.index import open_dir  # to open already existing index from folder
 # from whoosh import query           # to query for every document
 # from whoosh import scoring         # to use different scoring
+from whoosh.qparser import QueryParser
 from whoosh.query import Every       # for testing, to retrieve every document
 
 
@@ -22,7 +23,7 @@ from whoosh.query import Every       # for testing, to retrieve every document
 # Customize parameters here:
 
 corpus_dir = "../material/rcv1"     # Directory of your rcv1 folder
-docs_to_index = 250                 # How many docs to add to index, set to None to add all of the docs in the corpus
+docs_to_index = 2000                # How many docs to add to index, set to None to add all of the docs in the corpus
 
 #######################################################################################################################
 
@@ -71,13 +72,13 @@ def traverse_folders(writer, corpus):
 
 def extract_doc_content(file):
     tree = et.parse(file)
-    root = tree.getroot()
+    root = tree.getroot()  # Root is <newsitem>
     res = root.attrib["date"] + " "
-    doc_id = int(root.attrib["itemid"])
+    doc_id = int(root.attrib["itemid"])   # The doc id is an attribute of the <newsitem> tag
     for child in root:
-        if child.tag in ("headline", "dateline", "byline"):
+        if child.tag in ("headline", "dateline", "byline"):  # Just extract text
             res += child.text + " "
-        elif child.tag == "text":
+        elif child.tag == "text":  # Traverse all <p> tags and extract text from each one
             for paragraph in child:
                 res += paragraph.text + " "
     return res, doc_id
@@ -88,16 +89,18 @@ def extract_topic_query(topic_id, index, k):
     with open(os.path.join(corpus_dir, "..", "topics.txt")) as f:
         topics = f.read().split("</top>")
     topic = topics[topic_id]
-    topic = re.sub("<num> Number: R[0-9][0-9][0-9]", "", topic)
-    for tag in ("<top>", "<title>", "<desc> Description:", "<narr> Narrative:"):
+    topic = re.sub("<num> Number: R[0-9][0-9][0-9]", "", topic)   # Remove <num> and number-related text
+    for tag in ("<top>", "<title>", "<desc> Description:", "<narr> Narrative:"):  # Remove tags
         topic = topic.replace(tag, "")
 
     schema = Schema(id=NUMERIC(stored=True), content=TEXT)
 
+    # Delete directory if it already exists and create a new one
     if os.path.exists("topicindexdir"):
         shutil.rmtree("topicindexdir")
     os.makedirs("topicindexdir")
 
+    # Create auxiliary index with only 1 "document" (in reality, a topic)
     aux_index = create_in("topicindexdir", schema)
     writer = aux_index.writer()
     writer.add_document(id=0, content=topic)
@@ -119,9 +122,32 @@ def extract_topic_query(topic_id, index, k):
                       for word in aux_searcher.lexicon("content")}
             idf_dic = {word: math.log10(n_docs/(df+1)) for word, df in df_dic.items()}
 
+    # TODO: take into account how frequent a term is in an index that indexes all the topics
+    # Variation of TF-IDF, that uses term frequency in the topic but inverse document frequency against the corpus
     tfidfs = {key: tf_dic[key] * idf_dic[key] for key in tf_dic}
 
-    print(list(tup[0] for tup in Counter(tfidfs).most_common(k)))
+    return list(tup[0] for tup in Counter(tfidfs).most_common(k))
+
+
+def boolean_query(topic, k, index):
+    words = extract_topic_query(topic, index, k)
+    with index.searcher() as searcher:
+        # Retrieve every document id
+        results = searcher.search(Every(), limit=None)
+        # Initialize dictionary that counts how many query terms each document contains
+        occurrences = {r["id"]: 0 for r in results}
+        doc_ids = [r["id"] for r in results]
+        doc_ids.sort()
+        for word in words:
+            try:
+                for doc_id in searcher.postings("content", word).all_ids():
+                    occurrences[doc_ids[doc_id]] += 1
+            except TermNotFound:
+                pass
+
+        res = [doc_id for doc_id, occurrence in occurrences.items() if occurrence >= k - round(0.2*k)]
+        res.sort()
+        return res
 
 
 # Prints the entire index for debugging and manual analysis purposes
@@ -130,7 +156,6 @@ def print_index(index):
         results = searcher.search(Every(), limit=None)
         doc_ids = [r["id"] for r in results]
         doc_ids.sort()
-        doc_ids = {i: doc_id for i, doc_id in enumerate(doc_ids)}
         for word in searcher.lexicon("content"):
             print(word.decode("utf-8") + ": ", end="")
             for doc in searcher.postings("content", word).all_ids():
@@ -159,7 +184,8 @@ def main():
         # print(f"Docs returned: { {r['id']: r['content'] for r in results} }")
         # print(f"Doc scores: { {r['id']: r.score for r in results} }")  # Scores are always 1.0 with an Every() query
 
-    extract_topic_query(101, ix, 5)
+    print("Boolean query for topic 101 (k=3, 1 mismatch):")
+    print(boolean_query(101, 3, ix))
 
 
 main()
