@@ -2,19 +2,17 @@ import os
 import shutil
 import time
 import math
-import xml.etree.ElementTree as et
+import xml.etree.ElementTree as Et
 
 from collections import Counter
-from whoosh import scoring
 from whoosh.index import create_in
 from whoosh.fields import *
 from whoosh.reading import TermNotFound
-
+from whoosh import scoring           # to use different scoring
 # from whoosh.qparser import *       # to actually process queries
 # from whoosh.index import open_dir  # to open already existing index from folder
 # from whoosh import query           # to query for every document
-# from whoosh import scoring         # to use different scoring
-from whoosh.qparser import QueryParser
+
 from whoosh.query import Every       # for testing, to retrieve every document
 
 
@@ -22,8 +20,8 @@ from whoosh.query import Every       # for testing, to retrieve every document
 
 # Customize parameters here:
 
-corpus_dir = "../material/rcv1"     # Directory of your rcv1 folder
-docs_to_index = 2000                # How many docs to add to index, set to None to add all of the docs in the corpus
+corpus_dir = "../material/rcv1"      # Directory of your rcv1 folder
+docs_to_index = 2586                 # How many docs to add to index, set to None to add all of the docs in the corpus
 
 #######################################################################################################################
 
@@ -71,7 +69,7 @@ def traverse_folders(writer, corpus):
 
 
 def extract_doc_content(file):
-    tree = et.parse(file)
+    tree = Et.parse(file)
     root = tree.getroot()  # Root is <newsitem>
     res = root.attrib["date"] + " "
     doc_id = int(root.attrib["itemid"])   # The doc id is an attribute of the <newsitem> tag
@@ -87,11 +85,16 @@ def extract_doc_content(file):
 def extract_topic_query(topic_id, index, k):
     topic_id = int(topic_id)-101       # Normalize topic identifier to start at 0
     with open(os.path.join(corpus_dir, "..", "topics.txt")) as f:
-        topics = f.read().split("</top>")
-    topic = topics[topic_id]
-    topic = re.sub("<num> Number: R[0-9][0-9][0-9]", "", topic)   # Remove <num> and number-related text
-    for tag in ("<top>", "<title>", "<desc> Description:", "<narr> Narrative:"):  # Remove tags
-        topic = topic.replace(tag, "")
+        topics = f.read().split("</top>")[:-1]
+
+    norm_topics = []
+    for topic in topics:
+        norm_topic = re.sub("<num> Number: R[0-9][0-9][0-9]", "", topic)
+        for tag in ("<top>", "<title>", "<desc> Description:", "<narr> Narrative:"):
+            norm_topic = norm_topic.replace(tag, "")
+        norm_topics.append(norm_topic)
+
+    topic = norm_topics[topic_id]
 
     schema = Schema(id=NUMERIC(stored=True), content=TEXT)
 
@@ -111,8 +114,8 @@ def extract_topic_query(topic_id, index, k):
         # Dictionary of term frequencies in the TOPIC
         tf_dic = {word.decode("utf-8"): aux_searcher.frequency("content", word)
                   for word in aux_searcher.lexicon("content")}
-        n_terms_in_topic = sum(tf_dic.values())
-        tf_dic = {word: freq/n_terms_in_topic for word, freq in tf_dic.items()}
+        n_tokens_in_topic = sum(tf_dic.values())
+        tf_dic = {word: freq/n_tokens_in_topic for word, freq in tf_dic.items()}
 
         with index.searcher() as searcher:
             # Dictionary of document frequencies of each term against the DOCUMENT INDEX
@@ -122,9 +125,27 @@ def extract_topic_query(topic_id, index, k):
                       for word in aux_searcher.lexicon("content")}
             idf_dic = {word: math.log10(n_docs/(df+1)) for word, df in df_dic.items()}
 
-    # TODO: take into account how frequent a term is in an index that indexes all the topics
-    # Variation of TF-IDF, that uses term frequency in the topic but inverse document frequency against the corpus
-    tfidfs = {key: tf_dic[key] * idf_dic[key] for key in tf_dic}
+    schema = Schema(id=NUMERIC(stored=True), content=TEXT)
+
+    # Delete directory if it already exists and create a new one
+    if os.path.exists("topicsindexdir"):
+        shutil.rmtree("topicsindexdir")
+    os.makedirs("topicsindexdir")
+
+    # Create auxiliary index with the topics
+    topic_index = create_in("topicsindexdir", schema)
+    writer = topic_index.writer()
+    for i, topic in enumerate(norm_topics):
+        writer.add_document(id=i+101, content=topic)
+    writer.commit()
+
+    with topic_index.searcher(weighting=scoring.TF_IDF()) as topic_searcher:
+        topic_df_dic = {word.decode("utf-8"): topic_searcher.doc_frequency("content", word)
+                        for word in topic_searcher.lexicon("content")}
+        topic_idf_dic = {word: math.log10(100 / (df + 1)) for word, df in topic_df_dic.items()}
+
+    # Variation of TF-IDF, that uses topic tf and topics idf but also the idf against the corpus
+    tfidfs = {key: tf_dic[key] * idf_dic[key] * topic_idf_dic[key] for key in tf_dic}
 
     return list(tup[0] for tup in Counter(tfidfs).most_common(k))
 
@@ -184,8 +205,10 @@ def main():
         # print(f"Docs returned: { {r['id']: r['content'] for r in results} }")
         # print(f"Doc scores: { {r['id']: r.score for r in results} }")  # Scores are always 1.0 with an Every() query
 
-    print("Boolean query for topic 101 (k=3, 1 mismatch):")
-    print(boolean_query(101, 3, ix))
+    print("Boolean queries (k=3, 1 mismatch):")
+    for i in range(101, 201):
+        print(f"{i}: ")
+        print(boolean_query(i, 3, ix))
 
 
 main()

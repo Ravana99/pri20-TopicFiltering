@@ -2,6 +2,8 @@ material
 .idea
 indexdir
 topicindexdir
+topicsindexdir
+whoosh_docs.txt
 
 
 # Byte-compiled / optimized / DLL files
