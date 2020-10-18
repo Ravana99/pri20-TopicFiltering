@@ -2,22 +2,15 @@ import os
 import shutil
 import time
 import math
-import xml.etree.ElementTree as Et
-
-import trectools
-from trectools import TrecQrel, TrecRun, TrecEval, procedures
-
+from xml.etree import ElementTree
 from collections import Counter
+
 from whoosh.index import create_in
 from whoosh.fields import *
 from whoosh.qparser import *
 from whoosh.reading import TermNotFound
-from whoosh import scoring           # to use different scoring
-# from whoosh.qparser import *       # to actually process queries
-# from whoosh.index import open_dir  # to open already existing index from folder
-# from whoosh import query           # to query for every document
-
-from whoosh.query import Every       # for testing, to retrieve every document
+from whoosh.query import Every
+from whoosh import scoring
 
 
 #######################################################################################################################
@@ -25,7 +18,7 @@ from whoosh.query import Every       # for testing, to retrieve every document
 # Customize parameters here:
 
 corpus_dir = "../material/rcv1"      # Directory of your rcv1 folder
-docs_to_index = 10000                # How many docs to add to index, set to None to add all of the docs in the corpus
+docs_to_index = 100                  # How many docs to add to index, set to None to add all of the docs in the corpus
 
 #######################################################################################################################
 
@@ -76,7 +69,7 @@ def traverse_folders(writer, corpus, d_test=True):
 
 
 def extract_doc_content(file):
-    tree = Et.parse(file)
+    tree = ElementTree.parse(file)
     root = tree.getroot()  # Root is <newsitem>
     res = root.attrib["date"] + " "
     doc_id = int(root.attrib["itemid"])   # The doc id is an attribute of the <newsitem> tag
@@ -198,9 +191,6 @@ def ranking(topic_id, p, index, model="TF-IDF"):
         q = QueryParser("content", index.schema, group=OrGroup).parse(topic)
         results = searcher.search(q, limit=p)
         return [(r["id"], round(r.score, 4)) for r in results]
-
-
-
 
 
 # Prints the entire index for debugging and manual analysis purposes

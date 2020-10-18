@@ -1,5 +1,10 @@
-from whoosh import index
-from index import *
+from whoosh.index import open_dir
+from trectools import TrecQrel, TrecRun, TrecEval
+
+if __name__ == "__main__":
+    from inverted_index import *
+else:
+    from .inverted_index import *
 
 
 def evaluation(topics, r_test, ix):
@@ -79,10 +84,12 @@ def evaluate(qrels, runs_file, path_to_csv):
 
 def main():
     # This assumes you have already created the index
-    # If you haven't, adjust the number of docs to index and the corpus directory in index.py and run it
-    ix = index.open_dir(os.path.join("temp", "indexdir"))
+    # If you haven't, adjust the number of docs to index (10k+ recommended)
+    # and the corpus directory in inverted_index.py and run it
+    ix = open_dir(os.path.join("temp", "indexdir"))
 
     evaluation(range(101, 201), os.path.join(corpus_dir, "..", "qrels.test"), ix)
 
 
-main()
+if __name__ == "__main__":
+    main()
