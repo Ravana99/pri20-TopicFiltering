@@ -4,6 +4,9 @@ import time
 import math
 import xml.etree.ElementTree as Et
 
+import trectools
+from trectools import TrecQrel, TrecRun, TrecEval, procedures
+
 from collections import Counter
 from whoosh.index import create_in
 from whoosh.fields import *
@@ -22,7 +25,7 @@ from whoosh.query import Every       # for testing, to retrieve every document
 # Customize parameters here:
 
 corpus_dir = "../material/rcv1"      # Directory of your rcv1 folder
-docs_to_index = 100                  # How many docs to add to index, set to None to add all of the docs in the corpus
+docs_to_index = 10000                # How many docs to add to index, set to None to add all of the docs in the corpus
 
 #######################################################################################################################
 
@@ -35,13 +38,13 @@ def indexing(corpus, ram_limit=1024):  # TODO: allow customization for text prep
     # TODO: split content according to XML tags
     schema = Schema(id=NUMERIC(stored=True), content=TEXT)
 
-    # Clear existing indexdir folder and make new one
-    if os.path.exists("indexdir"):
-        shutil.rmtree("indexdir")
-    os.makedirs("indexdir")
+    # Clear existing temp/indexdir folder and make new one
+    if os.path.exists(os.path.join("temp", "indexdir")):
+        shutil.rmtree(os.path.join("temp", "indexdir"))
+    os.makedirs(os.path.join("temp", "indexdir"))
 
-    # Create index in indexdir folder
-    ix = create_in("indexdir", schema)
+    # Create index in temp/indexdir folder
+    ix = create_in(os.path.join("temp", "indexdir"), schema)
     writer = ix.writer(limitmb=ram_limit)
     traverse_folders(writer, corpus)
     writer.commit()
@@ -50,19 +53,22 @@ def indexing(corpus, ram_limit=1024):  # TODO: allow customization for text prep
 
     # Traverses all files in the indexdir folder to calculate disk space taken up by the index
     space = 0
-    for subdir, dirs, files in os.walk("indexdir"):
-        space += sum(os.stat(os.path.join("indexdir", file)).st_size for file in files)
+    for subdir, dirs, files in os.walk(os.path.join("temp", "indexdir")):
+        space += sum(os.stat(os.path.join("temp", "indexdir", file)).st_size for file in files)
 
     return ix, end_time - start_time, space
 
 
 # Traverses all sub-folders/files in the corpus and adds every document to the index
-def traverse_folders(writer, corpus):
+def traverse_folders(writer, corpus, d_test=True):
     n_docs = 0
     for subdir, dirs, files in os.walk(corpus):
         for file in files:
             # Ignore non-document files
             if file != "MD5SUMS" and subdir != os.path.join(corpus, "codes") and subdir != os.path.join(corpus, "dtds"):
+                # TODO: improve efficiency
+                if d_test and subdir[-8:] < "19961001":  # If using d_test, ignore docs before 1996-10-01
+                    continue
                 doc, doc_id = extract_doc_content(os.path.join(subdir, file))
                 writer.add_document(id=doc_id, content=doc)
                 if (n_docs := n_docs + 1) == docs_to_index:
@@ -95,12 +101,12 @@ def extract_topic_query(topic_id, index, k):
     schema = Schema(id=NUMERIC(stored=True), content=TEXT)
 
     # Delete directory if it already exists and create a new one
-    if os.path.exists("topicindexdir"):
-        shutil.rmtree("topicindexdir")
-    os.makedirs("topicindexdir")
+    if os.path.exists(os.path.join("temp", "topicindexdir")):
+        shutil.rmtree(os.path.join("temp", "topicindexdir"))
+    os.makedirs(os.path.join("temp", "topicindexdir"))
 
     # Create auxiliary index with only 1 "document" (in reality, a topic)
-    aux_index = create_in("topicindexdir", schema)
+    aux_index = create_in(os.path.join("temp", "topicindexdir"), schema)
     writer = aux_index.writer()
     writer.add_document(id=0, content=topic)
     writer.commit()
@@ -123,12 +129,12 @@ def extract_topic_query(topic_id, index, k):
     schema = Schema(id=NUMERIC(stored=True), content=TEXT)
 
     # Delete directory if it already exists and create a new one
-    if os.path.exists("topicsindexdir"):
-        shutil.rmtree("topicsindexdir")
-    os.makedirs("topicsindexdir")
+    if os.path.exists(os.path.join("temp", "topicsindexdir")):
+        shutil.rmtree(os.path.join("temp", "topicsindexdir"))
+    os.makedirs(os.path.join("temp", "topicsindexdir"))
 
     # Create auxiliary index with the topics
-    topic_index = create_in("topicsindexdir", schema)
+    topic_index = create_in(os.path.join("temp", "topicsindexdir"), schema)
     writer = topic_index.writer()
     for i, topic in enumerate(norm_topics):
         writer.add_document(id=i+101, content=topic)
@@ -194,13 +200,7 @@ def ranking(topic_id, p, index, model="TF-IDF"):
         return [(r["id"], round(r.score, 4)) for r in results]
 
 
-def evaluation(topics, r_test, d_test, index):
-    # Recall-precision curves for different output sizes
-    # MAP
-    # BPREF
-    # Cumulative gains and efficiency
 
-    pass
 
 
 # Prints the entire index for debugging and manual analysis purposes
@@ -226,24 +226,21 @@ def convert_filesize(size):
 
 
 def main():
-    (ix, ix_time, ix_space) = indexing(corpus_dir)
+    ix, ix_time, ix_space = indexing(corpus_dir)
+    # print("Whole index:"); print_index(ix)
     print(f"Time to build index: {round(ix_time, 3)}s")
     print(f"Disk space taken up by the index: {convert_filesize(ix_space)}")
-    # print("Whole index:"); print_index(ix)
 
     with ix.searcher() as searcher:
         results = searcher.search(Every(), limit=None)  # Returns every document
-        print(f"Number of docs returned: {len(results)}")
-        # print(f"Docs returned: { {r['id']: r['content'] for r in results} }")
-        # print(f"Doc scores: { {r['id']: r.score for r in results} }")  # Scores are always 1.0 with an Every() query
+        print(f"Number of indexed docs: {len(results)}")
 
-    # print("Boolean queries (k=3, 1 mismatch):")
-    # for i in range(101, 201):
-        # print(f"{i}: ")
-        # print(boolean_query(i, 3, ix))
+    print("Boolean queries for topic 102 (k=3, 1 mismatch):")
+    print(boolean_query(102, 3, ix))
 
-    # print("Ranked query for topic 101 (p=20):")
-    # print(ranking(101, 20, ix, "BM25"))
+    print("Ranked query (using BM25) for topic 101 (p=20):")
+    print(ranking(101, 20, ix, "BM25"))
 
 
-main()
+if __name__ == "__main__":
+    main()
