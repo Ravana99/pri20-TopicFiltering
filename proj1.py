@@ -7,6 +7,7 @@ import xml.etree.ElementTree as Et
 from collections import Counter
 from whoosh.index import create_in
 from whoosh.fields import *
+from whoosh.qparser import *
 from whoosh.reading import TermNotFound
 from whoosh import scoring           # to use different scoring
 # from whoosh.qparser import *       # to actually process queries
@@ -21,7 +22,7 @@ from whoosh.query import Every       # for testing, to retrieve every document
 # Customize parameters here:
 
 corpus_dir = "../material/rcv1"      # Directory of your rcv1 folder
-docs_to_index = 2586                 # How many docs to add to index, set to None to add all of the docs in the corpus
+docs_to_index = 100                  # How many docs to add to index, set to None to add all of the docs in the corpus
 
 #######################################################################################################################
 
@@ -87,12 +88,7 @@ def extract_topic_query(topic_id, index, k):
     with open(os.path.join(corpus_dir, "..", "topics.txt")) as f:
         topics = f.read().split("</top>")[:-1]
 
-    norm_topics = []
-    for topic in topics:
-        norm_topic = re.sub("<num> Number: R[0-9][0-9][0-9]", "", topic)
-        for tag in ("<top>", "<title>", "<desc> Description:", "<narr> Narrative:"):
-            norm_topic = norm_topic.replace(tag, "")
-        norm_topics.append(norm_topic)
+    norm_topics = normalize_topics(topics)
 
     topic = norm_topics[topic_id]
 
@@ -109,7 +105,6 @@ def extract_topic_query(topic_id, index, k):
     writer.add_document(id=0, content=topic)
     writer.commit()
 
-    # TODO: deal with words that show up in all the topics (e.g. "documents")
     with aux_index.searcher() as aux_searcher:
         # Dictionary of term frequencies in the TOPIC
         tf_dic = {word.decode("utf-8"): aux_searcher.frequency("content", word)
@@ -150,6 +145,16 @@ def extract_topic_query(topic_id, index, k):
     return list(tup[0] for tup in Counter(tfidfs).most_common(k))
 
 
+def normalize_topics(topics):
+    norm_topics = []
+    for topic in topics:
+        norm_topic = re.sub("<num> Number: R[0-9][0-9][0-9]", "", topic)
+        for tag in ("<top>", "<title>", "<desc> Description:", "<narr> Narrative:"):
+            norm_topic = norm_topic.replace(tag, "")
+        norm_topics.append(norm_topic)
+    return norm_topics
+
+
 def boolean_query(topic, k, index):
     words = extract_topic_query(topic, index, k)
     with index.searcher() as searcher:
@@ -169,6 +174,33 @@ def boolean_query(topic, k, index):
         res = [doc_id for doc_id, occurrence in occurrences.items() if occurrence >= k - round(0.2*k)]
         res.sort()
         return res
+
+
+def ranking(topic_id, p, index, model="TF-IDF"):
+    topic_id = int(topic_id)-101       # Normalize topic identifier to start at 0
+    if model == "TF-IDF":
+        weighting = scoring.TF_IDF()
+    elif model == "BM25":
+        weighting = scoring.BM25F()
+    else:
+        raise ValueError("Invalid scoring model: please use 'TF-IDF' or 'BM25'")
+    with open(os.path.join(corpus_dir, "..", "topics.txt")) as f:
+        topics = f.read().split("</top>")[:-1]
+    norm_topics = normalize_topics(topics)
+    topic = norm_topics[topic_id]
+    with index.searcher(weighting=weighting) as searcher:
+        q = QueryParser("content", index.schema, group=OrGroup).parse(topic)
+        results = searcher.search(q, limit=p)
+        return [(r["id"], round(r.score, 4)) for r in results]
+
+
+def evaluation(topics, r_test, d_test, index):
+    # Recall-precision curves for different output sizes
+    # MAP
+    # BPREF
+    # Cumulative gains and efficiency
+
+    pass
 
 
 # Prints the entire index for debugging and manual analysis purposes
@@ -205,10 +237,13 @@ def main():
         # print(f"Docs returned: { {r['id']: r['content'] for r in results} }")
         # print(f"Doc scores: { {r['id']: r.score for r in results} }")  # Scores are always 1.0 with an Every() query
 
-    print("Boolean queries (k=3, 1 mismatch):")
-    for i in range(101, 201):
-        print(f"{i}: ")
-        print(boolean_query(i, 3, ix))
+    # print("Boolean queries (k=3, 1 mismatch):")
+    # for i in range(101, 201):
+        # print(f"{i}: ")
+        # print(boolean_query(i, 3, ix))
+
+    # print("Ranked query for topic 101 (p=20):")
+    # print(ranking(101, 20, ix, "BM25"))
 
 
 main()
