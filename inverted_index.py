@@ -55,17 +55,18 @@ def indexing(corpus, ram_limit=1024):  # TODO: allow customization for text prep
 # Traverses all sub-folders/files in the corpus and adds every document to the index
 def traverse_folders(writer, corpus, d_test=True):
     n_docs = 0
-    for subdir, dirs, files in os.walk(corpus):
-        for file in files:
-            # Ignore non-document files
-            if file != "MD5SUMS" and subdir != os.path.join(corpus, "codes") and subdir != os.path.join(corpus, "dtds"):
-                # TODO: improve efficiency
-                if d_test and subdir[-8:] < "19961001":  # If using d_test, ignore docs before 1996-10-01
-                    continue
-                doc, doc_id = extract_doc_content(os.path.join(subdir, file))
-                writer.add_document(id=doc_id, content=doc)
-                if (n_docs := n_docs + 1) == docs_to_index:
-                    return
+
+    if d_test:
+        subdirs = list(filter(lambda x: x >= "19961001", os.listdir(corpus)))
+    else:
+        subdirs = os.listdir(corpus)
+
+    for subdir in subdirs:
+        for file in os.listdir(os.path.join(corpus, subdir)):
+            doc, doc_id = extract_doc_content(os.path.join(corpus, subdir, file))
+            writer.add_document(id=doc_id, content=doc)
+            if (n_docs := n_docs + 1) == docs_to_index:
+                return
 
 
 def extract_doc_content(file):

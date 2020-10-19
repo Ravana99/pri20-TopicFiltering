@@ -14,10 +14,14 @@ def evaluation(topics, r_test, ix):
     # Cumulative gains
     # Efficiency
 
-    # k = 1, p = 20
-    unranked_results = [boolean_query(topic, 1, ix) for topic in topics]
-    tfidf_results = [ranking(topic, 20, ix, "TF-IDF") for topic in topics]
-    bm25_results = [ranking(topic, 20, ix, "BM25") for topic in topics]
+    # k = 3, p = 1000
+    unranked_results = [boolean_query(topic, 3, ix) for topic in topics]
+    tfidf_results = [ranking(topic, 1000, ix, "TF-IDF") for topic in topics]
+    bm25_results = [ranking(topic, 1000, ix, "BM25") for topic in topics]
+
+    print(unranked_results[3])
+    print(tfidf_results[3])
+    print(bm25_results[3])
 
     # Query results are stored in temp/<scoring>/runs.txt, where scoring can either be "boolean", "tfidf" or "bm25"
     # Creating runs files for TrecTools
@@ -48,13 +52,13 @@ def evaluation(topics, r_test, ix):
     # Evaluation files are stored in temp/<scoring>/eval.csv, where scoring can either be "boolean", "tfidf" or "bm25"
     # Unranked evaluation
     runs_file = os.path.join("temp", "boolean", "runs.txt")
-    evaluate(qrels, runs_file, os.path.join("temp", "boolean", "eval.csv"))
+    evaluate(qrels, runs_file, os.path.join("eval", "boolean.csv"))
     # TF-IDF evaluation
     runs_file = os.path.join("temp", "tfidf", "runs.txt")
-    evaluate(qrels, runs_file, os.path.join("temp", "tfidf", "eval.csv"))
+    evaluate(qrels, runs_file, os.path.join("eval", "tfidf.csv"))
     # BM25 evaluation
     runs_file = os.path.join("temp", "bm25", "runs.txt")
-    evaluate(qrels, runs_file, os.path.join("temp", "bm25", "eval.csv"))
+    evaluate(qrels, runs_file, os.path.join("eval", "bm25.csv"))
 
 
 def evaluate(qrels, runs_file, path_to_csv):
@@ -76,8 +80,8 @@ def evaluate(qrels, runs_file, path_to_csv):
         lines[0] += ",ndcg@1000\n"                     # Add new column to header
         for i in range(1, 101):                        # Lines 1-100 contain metric values for each of the 100 queries
             lines[i] += "," + str(values[i-1]) + "\n"  # Line 1 (i) should store value 0 (i-1) - arrays start at 0
-        rprec = lines[101].split(",")[10]              # Retrieve R-precision from last line which stores global results
-        lines[101] += "," + rprec + "\n"               # Append global NDCG (=R-precision) to last line
+        global_ndcg = ev.get_ndcg(per_query=False)     # Calculate global NDCG
+        lines[101] += "," + str(global_ndcg) + "\n"    # Append global NDCG to last line
     with open(path_to_csv, 'w') as f:
         f.writelines(lines)                            # Overwrite csv file with new content
 
@@ -88,7 +92,7 @@ def main():
     # and the corpus directory in inverted_index.py and run it
     ix = open_dir(os.path.join("temp", "indexdir"))
 
-    evaluation(range(101, 201), os.path.join(corpus_dir, "..", "qrels.test"), ix)
+    evaluation(range(101, 111), os.path.join(corpus_dir, "..", "qrels.test"), ix)
 
 
 if __name__ == "__main__":
