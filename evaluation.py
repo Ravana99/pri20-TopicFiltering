@@ -15,10 +15,6 @@ def evaluation(topics, r_test, ix):
     tfidf_results = [ranking(topic, 1000, ix, "TF-IDF") for topic in topics]
     bm25_results = [ranking(topic, 1000, ix, "BM25") for topic in topics]
 
-    print(unranked_results[3])
-    print(tfidf_results[3])
-    print(bm25_results[3])
-
     # Query results are stored in temp/<scoring>/runs.txt, where scoring can either be "boolean", "tfidf" or "bm25"
     # Creating runs files for TrecTools
     with open(os.path.join("temp", "boolean", "runs.txt"), "w") as f:
