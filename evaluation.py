@@ -1,10 +1,6 @@
 from whoosh.index import open_dir
 from trectools import TrecQrel, TrecRun, TrecEval
-
-if __name__ == "__main__":
-    from inverted_index import *
-else:
-    from .inverted_index import *
+from inverted_index import *
 
 
 def evaluation(topics, r_test, ix):
