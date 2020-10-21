@@ -27,7 +27,7 @@ docs_to_index = 1000                 # How many docs to add to index, set to Non
 
 # By default, the writer will have 1GB (1024 MB) as the maximum memory for the indexing pool
 # However, the actual memory used will be higher than this value because of interpreter overhead (up to twice as much)
-def indexing(corpus, ram_limit=1024):  # TODO: allow analyzer customization with extra function arguments?
+def indexing(corpus, ram_limit=1024, d_test=True):  # TODO: allow analyzer customization with extra function arguments?
     start_time = time.time()
 
     schema = Schema(doc_id=NUMERIC(stored=True),
@@ -45,7 +45,7 @@ def indexing(corpus, ram_limit=1024):  # TODO: allow analyzer customization with
     # Create index in temp/indexdir folder
     ix = create_in(os.path.join("temp", "indexdir"), schema)
     writer = ix.writer(limitmb=ram_limit)
-    traverse_folders(writer, corpus)
+    traverse_folders(writer, corpus, d_test=d_test)
     writer.commit()
 
     end_time = time.time()
@@ -59,7 +59,7 @@ def indexing(corpus, ram_limit=1024):  # TODO: allow analyzer customization with
 
 
 # Traverses all sub-folders/files in the corpus and adds every document to the index
-def traverse_folders(writer, corpus, d_test=True):
+def traverse_folders(writer, corpus, d_test):
     n_docs = 0
 
     if d_test:
@@ -92,7 +92,7 @@ def extract_doc_content(file):
         elif child.tag == "text":  # Traverse all <p> tags and extract text from each one
             content = ""
             for paragraph in child:
-                content += paragraph.text + "\n"
+                content += (paragraph.text if paragraph.text is not None else "") + "\n"
     return doc_id, date, headline, dateline, byline, content
 
 
@@ -101,7 +101,7 @@ def extract_topic_query(topic_id, index, k):
     with open(os.path.join(corpus_dir, "..", "topics.txt")) as f:
         topics = f.read().split("</top>")[:-1]
 
-    norm_topics = normalize_topics(topics)
+    norm_topics = remove_tags(topics)
     topic = norm_topics[topic_id]
 
     schema = Schema(id=NUMERIC(stored=True), content=TEXT(analyzer=StemmingAnalyzer()))
@@ -162,7 +162,7 @@ def extract_topic_query(topic_id, index, k):
     return list(tup[0] for tup in Counter(tfidfs).most_common(k))
 
 
-def normalize_topics(topics):
+def remove_tags(topics):
     norm_topics = []
     for topic in topics:
         norm_topic = re.sub("<num> Number: R[0-9][0-9][0-9]", "", topic)
@@ -211,7 +211,7 @@ def ranking(topic_id, p, index, model="TF-IDF"):
         raise ValueError("Invalid scoring model: please use 'TF-IDF' or 'BM25'")
     with open(os.path.join(corpus_dir, "..", "topics.txt")) as f:
         topics = f.read().split("</top>")[:-1]
-    norm_topics = normalize_topics(topics)
+    norm_topics = remove_tags(topics)
     topic = norm_topics[topic_id]
     analyzer = StemmingAnalyzer()
     tokens = [token.text for token in analyzer(topic)]
