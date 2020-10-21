@@ -84,7 +84,7 @@ def main():
     # and the corpus directory in inverted_index.py and run it
     ix = open_dir(os.path.join("temp", "indexdir"))
 
-    evaluation(range(101, 111), os.path.join(corpus_dir, "..", "qrels.test"), ix)
+    evaluation(range(101, 201), os.path.join(corpus_dir, "..", "qrels.test"), ix)
 
 
 if __name__ == "__main__":

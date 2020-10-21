@@ -5,7 +5,9 @@ import math
 from xml.etree import ElementTree
 from collections import Counter
 
+# from whoosh.index import open_dir
 from whoosh.index import create_in
+from whoosh.analysis import StemmingAnalyzer, SpaceSeparatedTokenizer
 from whoosh.fields import *
 from whoosh.qparser import *
 from whoosh.reading import TermNotFound
@@ -18,18 +20,22 @@ from whoosh import scoring
 # Customize parameters here:
 
 corpus_dir = "../material/rcv1"      # Directory of your rcv1 folder
-docs_to_index = 100                  # How many docs to add to index, set to None to add all of the docs in the corpus
+docs_to_index = 1000                 # How many docs to add to index, set to None to add all of the docs in the corpus
 
 #######################################################################################################################
 
 
 # By default, the writer will have 1GB (1024 MB) as the maximum memory for the indexing pool
 # However, the actual memory used will be higher than this value because of interpreter overhead (up to twice as much)
-def indexing(corpus, ram_limit=1024):  # TODO: allow customization for text preprocessing using extra function arguments
+def indexing(corpus, ram_limit=1024):  # TODO: allow analyzer customization with extra function arguments?
     start_time = time.time()
 
-    # TODO: split content according to XML tags
-    schema = Schema(id=NUMERIC(stored=True), content=TEXT)
+    schema = Schema(doc_id=NUMERIC(stored=True),
+                    date=TEXT(analyzer=SpaceSeparatedTokenizer()),
+                    headline=TEXT(field_boost=3.0, analyzer=StemmingAnalyzer()),
+                    dateline=TEXT(analyzer=StemmingAnalyzer()),
+                    byline=TEXT(analyzer=StemmingAnalyzer()),
+                    content=TEXT(analyzer=StemmingAnalyzer()))
 
     # Clear existing temp/indexdir folder and make new one
     if os.path.exists(os.path.join("temp", "indexdir")):
@@ -57,14 +63,15 @@ def traverse_folders(writer, corpus, d_test=True):
     n_docs = 0
 
     if d_test:
-        subdirs = list(filter(lambda x: x >= "19961001", os.listdir(corpus)))
+        subdirs = filter(lambda x: x >= "19961001" and x not in ("codes", "dtds", "MD5SUMS"), os.listdir(corpus))
     else:
-        subdirs = os.listdir(corpus)
+        subdirs = filter(lambda x: x not in ("codes", "dtds", "MD5SUMS"), os.listdir(corpus))
 
     for subdir in subdirs:
         for file in os.listdir(os.path.join(corpus, subdir)):
-            doc, doc_id = extract_doc_content(os.path.join(corpus, subdir, file))
-            writer.add_document(id=doc_id, content=doc)
+            doc_id, date, headline, dateline, byline, content = extract_doc_content(os.path.join(corpus, subdir, file))
+            writer.add_document(doc_id=doc_id, date=date, headline=headline,
+                                dateline=dateline, byline=byline, content=content)
             if (n_docs := n_docs + 1) == docs_to_index:
                 return
 
@@ -72,15 +79,21 @@ def traverse_folders(writer, corpus, d_test=True):
 def extract_doc_content(file):
     tree = ElementTree.parse(file)
     root = tree.getroot()  # Root is <newsitem>
-    res = root.attrib["date"] + " "
     doc_id = int(root.attrib["itemid"])   # The doc id is an attribute of the <newsitem> tag
+    date = root.attrib["date"]
+    headline, dateline, byline, content = "", "", "", ""
     for child in root:
-        if child.tag in ("headline", "dateline", "byline"):  # Just extract text
-            res += child.text + " "
+        if child.tag == "headline":
+            headline = (child.text if child.text is not None else "")
+        elif child.tag == "dateline":
+            dateline = (child.text if child.text is not None else "")
+        elif child.tag == "byline":
+            byline = (child.text if child.text is not None else "")
         elif child.tag == "text":  # Traverse all <p> tags and extract text from each one
+            content = ""
             for paragraph in child:
-                res += paragraph.text + " "
-    return res, doc_id
+                content += paragraph.text + "\n"
+    return doc_id, date, headline, dateline, byline, content
 
 
 def extract_topic_query(topic_id, index, k):
@@ -89,10 +102,9 @@ def extract_topic_query(topic_id, index, k):
         topics = f.read().split("</top>")[:-1]
 
     norm_topics = normalize_topics(topics)
-
     topic = norm_topics[topic_id]
 
-    schema = Schema(id=NUMERIC(stored=True), content=TEXT)
+    schema = Schema(id=NUMERIC(stored=True), content=TEXT(analyzer=StemmingAnalyzer()))
 
     # Delete directory if it already exists and create a new one
     if os.path.exists(os.path.join("temp", "topicindexdir")):
@@ -116,11 +128,13 @@ def extract_topic_query(topic_id, index, k):
             # Dictionary of document frequencies of each term against the DOCUMENT INDEX
             results = searcher.search(Every(), limit=None)  # Returns every document
             n_docs = len(results)
-            df_dic = {word.decode("utf-8"): searcher.doc_frequency("content", word)
+            df_dic = {word.decode("utf-8"): sum([searcher.doc_frequency(field, word)
+                      for field in ("date", "headline", "dateline", "byline", "content")])
                       for word in aux_searcher.lexicon("content")}
+            print(df_dic)
             idf_dic = {word: math.log10(n_docs/(df+1)) for word, df in df_dic.items()}
 
-    schema = Schema(id=NUMERIC(stored=True), content=TEXT)
+    schema = Schema(id=NUMERIC(stored=True), content=TEXT(analyzer=StemmingAnalyzer()))
 
     # Delete directory if it already exists and create a new one
     if os.path.exists(os.path.join("temp", "topicsindexdir")):
@@ -135,12 +149,15 @@ def extract_topic_query(topic_id, index, k):
     writer.commit()
 
     with topic_index.searcher(weighting=scoring.TF_IDF()) as topic_searcher:
+        # Dictionary of inverse document frequencies of each term against the TOPICS
         topic_df_dic = {word.decode("utf-8"): topic_searcher.doc_frequency("content", word)
                         for word in topic_searcher.lexicon("content")}
+
         topic_idf_dic = {word: math.log10(100 / (df + 1)) for word, df in topic_df_dic.items()}
 
     # Variation of TF-IDF, that uses topic tf and topics idf but also the idf against the corpus
-    tfidfs = {key: tf_dic[key] * idf_dic[key] * topic_idf_dic[key] for key in tf_dic}
+    tfidfs = {key: tf_dic[key] * ((1/4)*idf_dic[key]+(3/4)*topic_idf_dic[key])
+              for key, value in df_dic.items() if value > 0}
 
     return list(tup[0] for tup in Counter(tfidfs).most_common(k))
 
@@ -157,23 +174,31 @@ def normalize_topics(topics):
 
 def boolean_query(topic, k, index):
     words = extract_topic_query(topic, index, k)
+    print(words)
     with index.searcher() as searcher:
         # Retrieve every document id
         results = searcher.search(Every(), limit=None)
         # Initialize dictionary that counts how many query terms each document contains
-        occurrences = {r["id"]: 0 for r in results}
-        doc_ids = [r["id"] for r in results]
+        occurrences = {r["doc_id"]: 0 for r in results}
+        doc_ids = [r["doc_id"] for r in results]
         doc_ids.sort()
         for word in words:
-            try:
-                for doc_id in searcher.postings("content", word).all_ids():
-                    occurrences[doc_ids[doc_id]] += 1
-            except TermNotFound:
-                pass
+            search_occurrences(searcher, occurrences, doc_ids, word)
 
         res = [doc_id for doc_id, occurrence in occurrences.items() if occurrence >= k - round(0.2*k)]
         res.sort()
         return res
+
+
+def search_occurrences(searcher, occurrences, doc_ids, word):
+    aux_occurrences = occurrences.copy()
+    for field in ("date", "headline", "dateline", "byline", "content"):
+        try:
+            for doc_id in searcher.postings(field, word).all_ids():
+                # Makes sure each entry is only incremented at the end once even if the term shows up in multiple fields
+                occurrences[doc_ids[doc_id]] = aux_occurrences[doc_ids[doc_id]] + 1
+        except TermNotFound:
+            continue
 
 
 def ranking(topic_id, p, index, model="TF-IDF"):
@@ -188,23 +213,29 @@ def ranking(topic_id, p, index, model="TF-IDF"):
         topics = f.read().split("</top>")[:-1]
     norm_topics = normalize_topics(topics)
     topic = norm_topics[topic_id]
+    analyzer = StemmingAnalyzer()
+    tokens = [token.text for token in analyzer(topic)]
+    string_query = ' '.join(tokens)
     with index.searcher(weighting=weighting) as searcher:
-        q = QueryParser("content", index.schema, group=OrGroup).parse(topic)
+        q = MultifieldParser(("date", "headline", "dateline", "byline", "content"),
+                             index.schema, group=OrGroup).parse(string_query)
         results = searcher.search(q, limit=p)
-        return [(r["id"], round(r.score, 4)) for r in results]
+        return [(r["doc_id"], round(r.score, 4)) for r in results]
 
 
 # Prints the entire index for debugging and manual analysis purposes
 def print_index(index):
     with index.searcher() as searcher:
         results = searcher.search(Every(), limit=None)
-        doc_ids = [r["id"] for r in results]
+        doc_ids = [r["doc_id"] for r in results]
         doc_ids.sort()
-        for word in searcher.lexicon("content"):
-            print(word.decode("utf-8") + ": ", end="")
-            for doc in searcher.postings("content", word).all_ids():
-                print(doc_ids[doc], end=" ")
-            print()
+        for field in ("date", "headline", "dateline", "byline", "content"):
+            print(f"Index for field {field}:")
+            for word in searcher.lexicon(field):
+                print(word.decode("utf-8") + ": ", end="")
+                for doc in searcher.postings(field, word).all_ids():
+                    print(doc_ids[doc], end=" ")
+                print()
 
 
 def convert_filesize(size):
@@ -217,7 +248,8 @@ def convert_filesize(size):
 
 
 def main():
-    ix, ix_time, ix_space = indexing(corpus_dir)
+    ix, ix_time, ix_space = indexing(corpus_dir, 2048)
+    # ix, ix_time, ix_space = open_dir("temp/indexdir"), 0, 0
     # print("Whole index:"); print_index(ix)
     print(f"Time to build index: {round(ix_time, 3)}s")
     print(f"Disk space taken up by the index: {convert_filesize(ix_space)}")
@@ -227,10 +259,13 @@ def main():
         print(f"Number of indexed docs: {len(results)}")
 
     print("Boolean queries for topic 102 (k=3, 1 mismatch):")
-    print(boolean_query(102, 3, ix))
+    print(boolean_query(104, 3, ix))
 
-    print("Ranked query (using BM25) for topic 101 (p=20):")
-    print(ranking(101, 20, ix, "BM25"))
+    print("Ranked query (using TF-IDF) for topic 102 (p=20):")
+    print(ranking(104, 20, ix, "TF-IDF"))
+
+    print("Ranked query (using BM25) for topic 102 (p=20):")
+    print(ranking(104, 20, ix, "BM25"))
 
 
 if __name__ == "__main__":
