@@ -20,7 +20,7 @@ from whoosh import scoring
 # Customize parameters here:
 
 corpus_dir = "../material/rcv1"      # Directory of your rcv1 folder
-docs_to_index = 1000                 # How many docs to add to index, set to None to add all of the docs in the corpus
+docs_to_index = 10000                # How many docs to add to index, set to None to add all of the docs in the corpus
 
 #######################################################################################################################
 
@@ -131,7 +131,6 @@ def extract_topic_query(topic_id, index, k):
             df_dic = {word.decode("utf-8"): sum([searcher.doc_frequency(field, word)
                       for field in ("date", "headline", "dateline", "byline", "content")])
                       for word in aux_searcher.lexicon("content")}
-            print(df_dic)
             idf_dic = {word: math.log10(n_docs/(df+1)) for word, df in df_dic.items()}
 
     schema = Schema(id=NUMERIC(stored=True), content=TEXT(analyzer=StemmingAnalyzer()))
@@ -174,7 +173,6 @@ def remove_tags(topics):
 
 def boolean_query(topic, k, index):
     words = extract_topic_query(topic, index, k)
-    print(words)
     with index.searcher() as searcher:
         # Retrieve every document id
         results = searcher.search(Every(), limit=None)
