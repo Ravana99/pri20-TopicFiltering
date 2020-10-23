@@ -1,4 +1,3 @@
-from whoosh.index import open_dir
 from trectools import TrecQrel, TrecRun, TrecEval
 from inverted_index import *
 import matplotlib.pyplot as plt
@@ -13,7 +12,7 @@ def evaluation(topics, r_test, ix):
     # Cumulative gains
     # Efficiency
 
-    # k = 3, p = 1000
+    # k = 3, p = 50000
     print("Executing boolean queries...")
     unranked_results = [boolean_query(topic, 3, ix) for topic in topics]
     print("Executing TF-IDF queries...")
@@ -24,21 +23,25 @@ def evaluation(topics, r_test, ix):
     # Query results are stored in temp/<scoring>/runs.txt, where scoring can either be "boolean", "tfidf" or "bm25"
     # Creating runs files for TrecTools
     print("Writing prep files...")
-    with open(os.path.join("temp", "boolean", "runs.txt"), "w") as f:
+    boolean_runs = os.path.join("runs", "boolean.txt")
+    with open(boolean_runs, "w") as f:
         for i, topic in enumerate(unranked_results):
             for j, r in enumerate(topic):
                 f.write(f"{topics[i]} Q0 {r} {j+1} 1 booleanIR\n")
-    with open(os.path.join("temp", "tfidf", "runs.txt"), "w") as f:
+    tfidf_runs = os.path.join("runs", "tfidf.txt")
+    with open(tfidf_runs, "w") as f:
         for i, topic in enumerate(tfidf_results):
             for j, r in enumerate(topic):
                 f.write(f"{topics[i]} Q0 {r[0]} {j+1} {r[1]} tfidfIR\n")
-    with open(os.path.join("temp", "bm25", "runs.txt"), "w") as f:
+    bm25_runs = os.path.join("runs", "bm25.txt")
+    with open(bm25_runs, "w") as f:
         for i, topic in enumerate(bm25_results):
             for j, r in enumerate(topic):
                 f.write(f"{topics[i]} Q0 {r[0]} {j+1} {r[1]} bm25IR\n")
 
     # Creating qrels file with the right format (at temp/qrelstest.txt)
-    with open(os.path.join("temp", "qrelstest.txt"), "w") as new:
+    qrels_file = os.path.join("runs", "qrelstest.txt")
+    with open(qrels_file, "w") as new:
         with open(r_test, "r") as f:
             for line in f:
                 topic, doc, relevant = line.split()
@@ -46,30 +49,26 @@ def evaluation(topics, r_test, ix):
                     new.write(f"{topic[1:]} 0 {doc} {relevant}\n")
 
     # Judgment
-    qrels_file = os.path.join("temp", "qrelstest.txt")
     qrels = TrecQrel(qrels_file)
 
     # Evaluation files are stored in temp/<scoring>/eval.csv, where scoring can either be "boolean", "tfidf" or "bm25"
     # Unranked evaluation
-    runs_file = os.path.join("temp", "boolean", "runs.txt")
     print("Beginning evaluation for boolean retrieval.")
-    evaluate(qrels, runs_file, topics, os.path.join("eval", "boolean.csv"))
+    evaluate(qrels, boolean_runs, topics, os.path.join("eval", "boolean", "results.csv"))
     print("Done!")
 
     # TF-IDF evaluation
-    runs_file = os.path.join("temp", "tfidf", "runs.txt")
     print("Beginning evaluation for TF-IDF retrieval.")
-    evaluate(qrels, runs_file, topics, os.path.join("eval", "tfidf.csv"))
+    evaluate(qrels, tfidf_runs, topics, os.path.join("eval", "tfidf", "results.csv"))
     print("Plotting Precision-Recall curves for each topic...")
-    plot_rp_curve(qrels, topics, runs_file, tfidf_results)
+    plot_rp_curve(qrels, topics, tfidf_runs, tfidf_results, "tfidf")
     print("Done!")
 
     # BM25 evaluation
-    runs_file = os.path.join("temp", "bm25", "runs.txt")
     print("Beginning evaluation for BM-25 retrieval.")
-    evaluate(qrels, runs_file, topics, os.path.join("eval", "bm25.csv"))
+    evaluate(qrels, bm25_runs, topics, os.path.join("eval", "bm25", "results.csv"))
     print("Plotting Precision-Recall curves for each topic...")
-    plot_rp_curve(qrels, topics, runs_file, bm25_results)
+    plot_rp_curve(qrels, topics, bm25_runs, bm25_results, "bm25")
     print("Done!")
     print("All evaluations finished. You can see detailed results in the 'eval' folder.")
 
@@ -106,7 +105,7 @@ def evaluate(qrels, runs_file, topics, path_to_csv):
 
 #######################################################################################################################
 
-def plot_rp_curve(qrels, topics, runs_file, results):
+def plot_rp_curve(qrels, topics, runs_file, results, model):
     runs = TrecRun(runs_file)
     ev = TrecEval(runs, qrels)
 
@@ -118,7 +117,8 @@ def plot_rp_curve(qrels, topics, runs_file, results):
         if row["rel"] > 0:
             relevant_docs[row["query"]].append(row["docid"])
 
-    # Obtain the recall and precision values for each topic and plot them
+    # TrecTools' precision calculations are very slow, so they are calculated "directly"
+    # Obtain the recall and precision @k values for every k up to 50k for each topic and plot them
     for i, topic in enumerate(topics):
         precisions_aux = [0]
         recalls_aux = [0]
@@ -137,13 +137,21 @@ def plot_rp_curve(qrels, topics, runs_file, results):
         recalls = [x / ev.get_relevant_documents() for x in recalls_aux]
         precisions = [(x / i if i > 0 else 1) for i, x in enumerate(precisions_aux)]
 
-        # Interpolate the precisions calculated before (needed to plot the data)
+        # Interpolate the precisions calculated before (needed to plot the recall-precision curve)
         interpolated_precisions = precisions.copy()
         j = len(interpolated_precisions) - 2
         while j >= 0:
             if interpolated_precisions[j+1] > interpolated_precisions[j]:
                 interpolated_precisions[j] = interpolated_precisions[j+1]
             j -= 1
+
+        # Reduce the number of points to plot
+        recalls = [value for j, value in enumerate(recalls)
+                   if not ((100 < j < 1000 and j % 10 != 0) or (j > 1000 and j % 100 != 0))]
+        precisions = [value for j, value in enumerate(precisions)
+                      if not ((100 < j < 1000 and j % 10 != 0) or (j > 1000 and j % 100 != 0))]
+        interpolated_precisions = [value for j, value in enumerate(interpolated_precisions)
+                                   if not ((100 < j < 1000 and j % 10 != 0) or (j > 1000 and j % 100 != 0))]
 
         # Plot the precision-recall curve of the topic
         fig, ax = plt.subplots()
@@ -156,7 +164,9 @@ def plot_rp_curve(qrels, topics, runs_file, results):
         ax.title.set_text("R"+str(topic))
         ax.set_xlabel("recall")
         ax.set_ylabel("precision")
-        fig.show()
+
+        # Save plot in eval folder
+        fig.savefig(os.path.join("eval", model, f"R{topic}.png"))
 
 
 #######################################################################################################################
@@ -165,7 +175,7 @@ def main():
     # This assumes you have already created the index
     # If you haven't, adjust the number of docs to index (10k+ recommended)
     # and the corpus directory in inverted_index.py and run it
-    ix = open_dir(os.path.join("temp", "indexdir"))
+    ix = open_dir(os.path.join("indexes", "docs"))
 
     # 5 different topics with varying outcomes across the topics and the 3 kinds of system
     evaluation([104, 121, 138, 164, 185], os.path.join(corpus_dir, "..", "qrels.test"), ix)

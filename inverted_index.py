@@ -5,7 +5,7 @@ import math
 from xml.etree import ElementTree
 from collections import Counter
 
-# from whoosh.index import open_dir
+from whoosh.index import open_dir
 from whoosh.index import create_in
 from whoosh.analysis import StemmingAnalyzer, SpaceSeparatedTokenizer
 from whoosh.fields import *
@@ -19,7 +19,7 @@ from whoosh import scoring
 
 # Customize parameters here:
 
-corpus_dir = "../material/rcv1"      # Directory of your rcv1 folder
+corpus_dir = os.path.join("..", "material", "rcv1")      # Directory of your rcv1 folder
 docs_to_index = 10000                # How many docs to add to index, set to None to add all of the docs in the corpus
 
 #######################################################################################################################
@@ -37,13 +37,15 @@ def indexing(corpus, ram_limit=1024, d_test=True):  # TODO: allow analyzer custo
                     byline=TEXT(analyzer=StemmingAnalyzer()),
                     content=TEXT(analyzer=StemmingAnalyzer()))
 
-    # Clear existing temp/indexdir folder and make new one
-    if os.path.exists(os.path.join("temp", "indexdir")):
-        shutil.rmtree(os.path.join("temp", "indexdir"))
-    os.makedirs(os.path.join("temp", "indexdir"))
+    index_dir = os.path.join("indexes", "docs")
 
-    # Create index in temp/indexdir folder
-    ix = create_in(os.path.join("temp", "indexdir"), schema)
+    # Clear existing indexes/docs folder and make new one
+    if os.path.exists(index_dir):
+        shutil.rmtree(index_dir)
+    os.makedirs(index_dir)
+
+    # Create index in indexes/docs folder
+    ix = create_in(index_dir, schema)
     writer = ix.writer(limitmb=ram_limit)
     traverse_folders(writer, corpus, d_test=d_test)
     writer.commit()
@@ -52,8 +54,8 @@ def indexing(corpus, ram_limit=1024, d_test=True):  # TODO: allow analyzer custo
 
     # Traverses all files in the indexdir folder to calculate disk space taken up by the index
     space = 0
-    for subdir, dirs, files in os.walk(os.path.join("temp", "indexdir")):
-        space += sum(os.stat(os.path.join("temp", "indexdir", file)).st_size for file in files)
+    for subdir, dirs, files in os.walk(index_dir):
+        space += sum(os.stat(os.path.join(index_dir, file)).st_size for file in files)
 
     return ix, end_time - start_time, space
 
@@ -106,13 +108,15 @@ def extract_topic_query(topic_id, index, k):
 
     schema = Schema(id=NUMERIC(stored=True), content=TEXT(analyzer=StemmingAnalyzer()))
 
+    topic_index_dir = os.path.join("indexes", "aux_topic")
+
     # Delete directory if it already exists and create a new one
-    if os.path.exists(os.path.join("temp", "topicindexdir")):
-        shutil.rmtree(os.path.join("temp", "topicindexdir"))
-    os.makedirs(os.path.join("temp", "topicindexdir"))
+    if os.path.exists(topic_index_dir):
+        shutil.rmtree(topic_index_dir)
+    os.makedirs(topic_index_dir)
 
     # Create auxiliary index with only 1 "document" (in reality, a topic)
-    aux_index = create_in(os.path.join("temp", "topicindexdir"), schema)
+    aux_index = create_in(topic_index_dir, schema)
     writer = aux_index.writer()
     writer.add_document(id=0, content=topic)
     writer.commit()
@@ -120,7 +124,8 @@ def extract_topic_query(topic_id, index, k):
     with aux_index.searcher() as aux_searcher:
         # Dictionary of term frequencies in the TOPIC
         tf_dic = {word.decode("utf-8"): aux_searcher.frequency("content", word)
-                  for word in aux_searcher.lexicon("content")}
+                  for word in aux_searcher.lexicon("content")
+                  if word.decode("utf-8") not in ("document", "relev", "irrelev", "relevant", "irrelevant")}
         n_tokens_in_topic = sum(tf_dic.values())
         tf_dic = {word: freq/n_tokens_in_topic for word, freq in tf_dic.items()}
 
@@ -128,35 +133,13 @@ def extract_topic_query(topic_id, index, k):
             # Dictionary of document frequencies of each term against the DOCUMENT INDEX
             results = searcher.search(Every(), limit=None)  # Returns every document
             n_docs = len(results)
-            df_dic = {word.decode("utf-8"): sum([searcher.doc_frequency(field, word)
+            df_dic = {word: sum([searcher.doc_frequency(field, word)
                       for field in ("date", "headline", "dateline", "byline", "content")])
-                      for word in aux_searcher.lexicon("content")}
+                      for word in tf_dic}
             idf_dic = {word: math.log10(n_docs/(df+1)) for word, df in df_dic.items()}
 
-    schema = Schema(id=NUMERIC(stored=True), content=TEXT(analyzer=StemmingAnalyzer()))
-
-    # Delete directory if it already exists and create a new one
-    if os.path.exists(os.path.join("temp", "topicsindexdir")):
-        shutil.rmtree(os.path.join("temp", "topicsindexdir"))
-    os.makedirs(os.path.join("temp", "topicsindexdir"))
-
-    # Create auxiliary index with the topics
-    topic_index = create_in(os.path.join("temp", "topicsindexdir"), schema)
-    writer = topic_index.writer()
-    for i, topic in enumerate(norm_topics):
-        writer.add_document(id=i+101, content=topic)
-    writer.commit()
-
-    with topic_index.searcher(weighting=scoring.TF_IDF()) as topic_searcher:
-        # Dictionary of inverse document frequencies of each term against the TOPICS
-        topic_df_dic = {word.decode("utf-8"): topic_searcher.doc_frequency("content", word)
-                        for word in topic_searcher.lexicon("content")}
-
-        topic_idf_dic = {word: math.log10(100 / (df + 1)) for word, df in topic_df_dic.items()}
-
     # Variation of TF-IDF, that uses topic tf and topics idf but also the idf against the corpus
-    tfidfs = {key: tf_dic[key] * ((1/4)*idf_dic[key]+(3/4)*topic_idf_dic[key])
-              for key, value in df_dic.items() if value > 0}
+    tfidfs = {key: tf_dic[key] * idf_dic[key] for key, value in df_dic.items() if value > 0}
 
     return list(tup[0] for tup in Counter(tfidfs).most_common(k))
 
@@ -247,7 +230,7 @@ def convert_filesize(size):
 
 def main():
     ix, ix_time, ix_space = indexing(corpus_dir, 2048)
-    # ix, ix_time, ix_space = open_dir("temp/indexdir"), 0, 0
+    # ix, ix_time, ix_space = open_dir(os.path.join("indexes", "docs")), 0, 0
     # print("Whole index:"); print_index(ix)
     print(f"Time to build index: {round(ix_time, 3)}s")
     print(f"Disk space taken up by the index: {convert_filesize(ix_space)}")
@@ -256,13 +239,13 @@ def main():
         results = searcher.search(Every(), limit=None)  # Returns every document
         print(f"Number of indexed docs: {len(results)}")
 
-    print("Boolean queries for topic 102 (k=3, 1 mismatch):")
+    print("Boolean queries for topic 104 (k=3, 1 mismatch):")
     print(boolean_query(104, 3, ix))
 
-    print("Ranked query (using TF-IDF) for topic 102 (p=20):")
+    print("Ranked query (using TF-IDF) for topic 104 (p=20):")
     print(ranking(104, 20, ix, "TF-IDF"))
 
-    print("Ranked query (using BM25) for topic 102 (p=20):")
+    print("Ranked query (using BM25) for topic 104 (p=20):")
     print(ranking(104, 20, ix, "BM25"))
 
 
