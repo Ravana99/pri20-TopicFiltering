@@ -4,6 +4,8 @@ from inverted_index import *
 import matplotlib.pyplot as plt
 
 
+#######################################################################################################################
+
 def evaluation(topics, r_test, ix):
     # Recall-precision curves for different output sizes
     # MAP
@@ -72,6 +74,8 @@ def evaluation(topics, r_test, ix):
     print("All evaluations finished. You can see detailed results in the 'eval' folder.")
 
 
+#######################################################################################################################
+
 def evaluate(qrels, runs_file, topics, path_to_csv):
     runs = TrecRun(runs_file)
     ev = TrecEval(runs, qrels)
@@ -100,29 +104,40 @@ def evaluate(qrels, runs_file, topics, path_to_csv):
         f.writelines(lines)                            # Overwrite csv file with new content
 
 
+#######################################################################################################################
+
 def plot_rp_curve(qrels, topics, runs_file, results):
     runs = TrecRun(runs_file)
     ev = TrecEval(runs, qrels)
 
+    # Get the relevant documents for each one of the topics
     new_qrels = ev.qrels.qrels_data.copy()
     relevant_docs = {topic: [] for topic in topics}
     for i, row in new_qrels.iterrows():
+        # If the returned document is relevant, add it to the list of relevant docs of the respective topic
         if row["rel"] > 0:
             relevant_docs[row["query"]].append(row["docid"])
 
+    # Obtain the recall and precision values for each topic and plot them
     for i, topic in enumerate(topics):
         precisions_aux = [0]
         recalls_aux = [0]
+
+        # Get the number of true positives for the given topic
         for j in range(min(50001, len(results[i]))):
+            # Check if the docid is in the list of relevant documents for that topic
             if results[i][j][0] in relevant_docs[topic]:
                 recalls_aux.append(recalls_aux[j] + 1)
                 precisions_aux.append(precisions_aux[j] + 1)
             else:
                 recalls_aux.append(recalls_aux[j])
                 precisions_aux.append(precisions_aux[j])
+
+        # Calculate precision and recall values based on the previous values
         recalls = [x / ev.get_relevant_documents() for x in recalls_aux]
         precisions = [(x / i if i > 0 else 1) for i, x in enumerate(precisions_aux)]
 
+        # Interpolate the precisions calculated before (needed to plot the data)
         interpolated_precisions = precisions.copy()
         j = len(interpolated_precisions) - 2
         while j >= 0:
@@ -130,6 +145,7 @@ def plot_rp_curve(qrels, topics, runs_file, results):
                 interpolated_precisions[j] = interpolated_precisions[j+1]
             j -= 1
 
+        # Plot the precision-recall curve of the topic
         fig, ax = plt.subplots()
         for j in range(len(recalls)-2):
             ax.plot((recalls[j], recalls[j]), (interpolated_precisions[j], interpolated_precisions[j+1]),
@@ -142,6 +158,8 @@ def plot_rp_curve(qrels, topics, runs_file, results):
         ax.set_ylabel("precision")
         fig.show()
 
+
+#######################################################################################################################
 
 def main():
     # This assumes you have already created the index
