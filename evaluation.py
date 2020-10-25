@@ -1,9 +1,17 @@
 from trectools import TrecQrel, TrecRun, TrecEval
+from whoosh.index import open_dir
 from inverted_index import *
 import matplotlib.pyplot as plt
 
+#######################################################################################################################
+
+# Customize parameters here:
+
+k = 5
+p = 1000
 
 #######################################################################################################################
+
 
 def evaluation(topics, r_test, ix):
     # Recall-precision curves for different output sizes
@@ -12,13 +20,12 @@ def evaluation(topics, r_test, ix):
     # Cumulative gains
     # Efficiency
 
-    # k = 3, p = 5000
     print("Executing boolean queries...")
-    unranked_results = [boolean_query(topic, 3, ix) for topic in topics]
+    unranked_results = [boolean_query(topic, k, ix) for topic in topics]
     print("Executing TF-IDF queries...")
-    tfidf_results = [ranking(topic, 5000, ix, "TF-IDF") for topic in topics]
+    tfidf_results = [ranking(topic, p, ix, "TF-IDF") for topic in topics]
     print("Executing BM25 queries...")
-    bm25_results = [ranking(topic, 5000, ix, "BM25") for topic in topics]
+    bm25_results = [ranking(topic, p, ix, "BM25") for topic in topics]
 
     # Query results are stored in temp/<scoring>/runs.txt, where scoring can either be "boolean", "tfidf" or "bm25"
     # Creating runs files for TrecTools
@@ -54,19 +61,19 @@ def evaluation(topics, r_test, ix):
     # Evaluation files are stored in temp/<scoring>/eval.csv, where scoring can either be "boolean", "tfidf" or "bm25"
     # Unranked evaluation
     print("Beginning evaluation for boolean retrieval.")
-    evaluate_boolean(qrels_file, unranked_results, topics, os.path.join("eval", "boolean", "results.csv"))
+    evaluate_boolean(qrels_file, unranked_results, topics)
     print("Done!")
 
     # TF-IDF evaluation
     print("Beginning evaluation for TF-IDF retrieval.")
-    evaluate(qrels, tfidf_runs, topics, os.path.join("eval", "tfidf", "results.csv"))
+    evaluate(qrels, tfidf_runs, topics, "tfidf")
     print("Plotting Precision-Recall curves for each topic...")
     plot_rp_curve(qrels, topics, tfidf_runs, tfidf_results, "tfidf")
     print("Done!")
 
     # BM25 evaluation
     print("Beginning evaluation for BM-25 retrieval.")
-    evaluate(qrels, bm25_runs, topics, os.path.join("eval", "bm25", "results.csv"))
+    evaluate(qrels, bm25_runs, topics, "bm25")
     print("Plotting Precision-Recall curves for each topic...")
     plot_rp_curve(qrels, topics, bm25_runs, bm25_results, "bm25")
     print("Done!")
@@ -75,9 +82,11 @@ def evaluation(topics, r_test, ix):
 
 #######################################################################################################################
 
-def evaluate(qrels, runs_file, topics, path_to_csv):
+def evaluate(qrels, runs_file, topics, model):
     runs = TrecRun(runs_file)
     ev = TrecEval(runs, qrels)
+
+    path_to_csv = os.path.join("eval", model, "results.csv")
 
     n_topics = len(topics)
 
@@ -105,12 +114,16 @@ def evaluate(qrels, runs_file, topics, path_to_csv):
 
 #######################################################################################################################
 
-def evaluate_boolean(qrels, retrieved_docs, topics, path_to_csv):
+def evaluate_boolean(qrels, retrieved_docs, topics):
+    print("Calculating metrics...")
+
+    path_to_csv = os.path.join("eval", "boolean", "results.csv")
+
     with open(qrels, 'r') as file:
         lines = file.readlines()
 
-    relevant_docs = [[] for topic in topics]
-    relevant_retrieved_docs = [[] for topic in topics]
+    relevant_docs = [[] for _ in topics]
+    relevant_retrieved_docs = [[] for _ in topics]
     precisions = []
     recalls = []
     f_betas = []
@@ -142,7 +155,7 @@ def evaluate_boolean(qrels, retrieved_docs, topics, path_to_csv):
     # Calculate F-Beta measure (beta = 0.5)
     for i in range(len(precisions)):
         if precisions[i] != 0 or recalls[i] != 0:
-            f_betas.append( (1 + 0.5**2) * ((precisions[i] * recalls[i]) / ((0.5**2 * precisions[i]) + recalls[i])) )
+            f_betas.append((1 + 0.5**2) * ((precisions[i] * recalls[i]) / ((0.5**2 * precisions[i]) + recalls[i])))
         else:
             f_betas.append(0.0)
 
@@ -170,13 +183,13 @@ def plot_rp_curve(qrels, topics, runs_file, results, model):
     num_relevant_docs = {doc_id: num for doc_id, num in ev.get_relevant_documents(per_query=True).iteritems()}
 
     # TrecTools' precision calculations are very slow, so they are calculated "directly"
-    # Obtain the recall and precision @k values for every k up to 5k for each topic and plot them
+    # Obtain the recall and precision @k values for every k up to p for each topic and plot them
     for i, topic in enumerate(topics):
         precisions_aux = [0]
         recalls_aux = [0]
 
         # Get the number of true positives for the given topic
-        for j in range(min(5001, len(results[i]))):
+        for j in range(min(p+1, len(results[i]))):
             # Check if the docid is in the list of relevant documents for that topic
             if results[i][j][0] in relevant_docs[topic]:
                 recalls_aux.append(recalls_aux[j] + 1)
@@ -197,7 +210,7 @@ def plot_rp_curve(qrels, topics, runs_file, results, model):
                 interpolated_precisions[j] = interpolated_precisions[j+1]
             j -= 1
 
-        # Reduce the number of points to plot
+        # Reduce the number of points to plot to avoid excessive memory usage
         recalls = [value for j, value in enumerate(recalls)
                    if not ((100 < j < 1000 and j % 10 != 0) or (j > 1000 and j % 100 != 0))]
         precisions = [value for j, value in enumerate(precisions)

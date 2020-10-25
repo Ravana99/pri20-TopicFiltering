@@ -5,7 +5,7 @@ import math
 from xml.etree import ElementTree
 from collections import Counter
 
-from whoosh.index import open_dir
+# from whoosh.index import open_dir
 from whoosh.index import create_in
 from whoosh.analysis import StemmingAnalyzer, SpaceSeparatedTokenizer, StandardAnalyzer
 from whoosh.fields import *
@@ -20,7 +20,7 @@ from whoosh import scoring
 # Customize parameters here:
 
 corpus_dir = os.path.join("..", "material", "rcv1")      # Directory of your rcv1 folder
-docs_to_index = 100000                # How many docs to add to index, set to None to add all of the docs in the corpus
+docs_to_index = 1000                # How many docs to add to index, set to None to add all of the docs in the corpus
 stemming = True
 
 #######################################################################################################################
@@ -35,19 +35,16 @@ def indexing(corpus, ram_limit=1024, d_test=True, stemmed=True):
     stemming = stemmed
 
     if stemming:
-        schema = Schema(doc_id=NUMERIC(stored=True),
-                        date=TEXT(analyzer=SpaceSeparatedTokenizer()),
-                        headline=TEXT(field_boost=1.5, analyzer=StemmingAnalyzer()),
-                        dateline=TEXT(analyzer=StemmingAnalyzer()),
-                        byline=TEXT(analyzer=StemmingAnalyzer()),
-                        content=TEXT(analyzer=StemmingAnalyzer()))
+        analyzer = StemmingAnalyzer()
     else:
-        schema = Schema(doc_id=NUMERIC(stored=True),
-                        date=TEXT(analyzer=SpaceSeparatedTokenizer()),
-                        headline=TEXT(field_boost=1.5),
-                        dateline=TEXT(),
-                        byline=TEXT(),
-                        content=TEXT())
+        analyzer = StandardAnalyzer()
+
+    schema = Schema(doc_id=NUMERIC(stored=True),
+                    date=TEXT(analyzer=SpaceSeparatedTokenizer()),
+                    headline=TEXT(field_boost=1.5, analyzer=analyzer),
+                    dateline=TEXT(analyzer=analyzer),
+                    byline=TEXT(analyzer=analyzer),
+                    content=TEXT(analyzer=analyzer))
 
     index_dir = os.path.join("indexes", "docs")
 
@@ -112,7 +109,7 @@ def extract_doc_content(file):
 
 
 def extract_topic_query(topic_id, index, k):
-    topic_id = int(topic_id)-101       # Normalize topic identifier to start at 0
+    topic_id = int(topic_id)-101  # Normalize topic identifier to start at 0
     with open(os.path.join(corpus_dir, "..", "topics.txt")) as f:
         topics = f.read().split("</top>")[:-1]
 
@@ -206,6 +203,7 @@ def ranking(topic_id, p, index, model="TF-IDF"):
         weighting = scoring.BM25F()
     else:
         raise ValueError("Invalid scoring model: please use 'TF-IDF' or 'BM25'")
+
     with open(os.path.join(corpus_dir, "..", "topics.txt")) as f:
         topics = f.read().split("</top>")[:-1]
     norm_topics = remove_tags(topics)
