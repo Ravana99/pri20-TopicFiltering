@@ -54,7 +54,7 @@ def evaluation(topics, r_test, ix):
     # Evaluation files are stored in temp/<scoring>/eval.csv, where scoring can either be "boolean", "tfidf" or "bm25"
     # Unranked evaluation
     print("Beginning evaluation for boolean retrieval.")
-    evaluate(qrels, boolean_runs, topics, os.path.join("eval", "boolean", "results.csv"))
+    evaluate_boolean(qrels_file, unranked_results, topics, os.path.join("eval", "boolean", "results.csv"))
     print("Done!")
 
     # TF-IDF evaluation
@@ -105,6 +105,63 @@ def evaluate(qrels, runs_file, topics, path_to_csv):
 
 #######################################################################################################################
 
+def evaluate_boolean(qrels, retrieved_docs, topics, path_to_csv):
+    with open(qrels, 'r') as file:
+        lines = file.readlines()
+
+    relevant_docs = [[] for topic in topics]
+    relevant_retrieved_docs = [[] for topic in topics]
+    precisions = []
+    recalls = []
+    f_betas = []
+
+    # Get all the relevant documents for each topic
+    for i in range(len(topics)):
+        for line in lines:
+            aux = line.split(' ')
+            topic_id = aux[0]
+            doc_id = aux[2]
+            relevant = aux[3]
+            if int(topic_id) == topics[i] and int(relevant) == 1:
+                relevant_docs[i].append(int(doc_id))
+
+    # Get all relevant retrieved docs for each topic
+    for i in range(len(topics)):
+        for doc in retrieved_docs[i]:
+            if doc in relevant_docs[i]:
+                relevant_retrieved_docs[i].append(doc)
+
+    # Calculate precisions and recalls for each topic
+    for i in range(len(topics)):
+        if len(retrieved_docs[i]) != 0:
+            precisions.append(len(relevant_retrieved_docs[i]) / len(retrieved_docs[i]))
+        else:
+            precisions.append(0.0)
+        recalls.append(len(relevant_retrieved_docs[i]) / len(relevant_docs[i]))
+
+    # Calculate F-Beta measure (beta = 0.5)
+    for i in range(len(precisions)):
+        if precisions[i] != 0 or recalls[i] != 0:
+            f_betas.append( (1 + 0.5**2) * ((precisions[i] * recalls[i]) / ((0.5**2 * precisions[i]) + recalls[i])) )
+        else:
+            f_betas.append(0.0)
+
+    # Print results to file
+    with open(path_to_csv, 'w') as file:
+        file.write("topic,precision,recall,fbeta\n")
+        for i in range(len(topics)):
+            file.write(f"{topics[i]},{precisions[i]},{recalls[i]},{f_betas[i]}\n")
+
+    print(retrieved_docs)
+    print(relevant_docs)
+    print(relevant_retrieved_docs)
+    print(precisions)
+    print(recalls)
+    print(f_betas)
+
+
+#######################################################################################################################
+
 def plot_rp_curve(qrels, topics, runs_file, results, model):
     runs = TrecRun(runs_file)
     ev = TrecEval(runs, qrels)
@@ -138,13 +195,6 @@ def plot_rp_curve(qrels, topics, runs_file, results, model):
         # Calculate precision and recall values based on the previous values
         recalls = [x / num_relevant_docs[topic] for x in recalls_aux]
         precisions = [(x / i if i > 0 else 1) for i, x in enumerate(precisions_aux)]
-
-        # Calculate f-beta measure (beta = 0.5)
-        if precisions[-1] != 0 or recalls[-1] != 0:
-            f_beta = (1 + 0.5**2) * ((precisions[-1] * recalls[-1]) / ((0.5**2 * precisions[-1]) + recalls[-1]))
-        else:
-            f_beta = 0
-        print(f"F-Beta measure for topic {topic} (beta = 0.5): {f_beta}")
 
         # Interpolate the precisions calculated before (needed to plot the recall-precision curve)
         interpolated_precisions = precisions.copy()
