@@ -12,13 +12,13 @@ def evaluation(topics, r_test, ix):
     # Cumulative gains
     # Efficiency
 
-    # k = 3, p = 50000
+    # k = 3, p = 5000
     print("Executing boolean queries...")
     unranked_results = [boolean_query(topic, 3, ix) for topic in topics]
     print("Executing TF-IDF queries...")
-    tfidf_results = [ranking(topic, 50000, ix, "TF-IDF") for topic in topics]
+    tfidf_results = [ranking(topic, 5000, ix, "TF-IDF") for topic in topics]
     print("Executing BM25 queries...")
-    bm25_results = [ranking(topic, 50000, ix, "BM25") for topic in topics]
+    bm25_results = [ranking(topic, 5000, ix, "BM25") for topic in topics]
 
     # Query results are stored in temp/<scoring>/runs.txt, where scoring can either be "boolean", "tfidf" or "bm25"
     # Creating runs files for TrecTools
@@ -118,13 +118,13 @@ def plot_rp_curve(qrels, topics, runs_file, results, model):
             relevant_docs[row["query"]].append(row["docid"])
 
     # TrecTools' precision calculations are very slow, so they are calculated "directly"
-    # Obtain the recall and precision @k values for every k up to 50k for each topic and plot them
+    # Obtain the recall and precision @k values for every k up to 5k for each topic and plot them
     for i, topic in enumerate(topics):
         precisions_aux = [0]
         recalls_aux = [0]
 
         # Get the number of true positives for the given topic
-        for j in range(min(50001, len(results[i]))):
+        for j in range(min(5001, len(results[i]))):
             # Check if the docid is in the list of relevant documents for that topic
             if results[i][j][0] in relevant_docs[topic]:
                 recalls_aux.append(recalls_aux[j] + 1)
@@ -136,6 +136,13 @@ def plot_rp_curve(qrels, topics, runs_file, results, model):
         # Calculate precision and recall values based on the previous values
         recalls = [x / ev.get_relevant_documents() for x in recalls_aux]
         precisions = [(x / i if i > 0 else 1) for i, x in enumerate(precisions_aux)]
+
+        # Calculate f-beta measure (beta = 0.5)
+        if precisions[-1] != 0 or recalls[-1] != 0:
+            f_beta = (1 + 0.5**2) * ((precisions[-1] * recalls[-1]) / ((0.5**2 * precisions[-1]) + recalls[-1]))
+        else:
+            f_beta = 0
+        print(f"F-Beta measure for topic {topic} (beta = 0.5): {f_beta}")
 
         # Interpolate the precisions calculated before (needed to plot the recall-precision curve)
         interpolated_precisions = precisions.copy()

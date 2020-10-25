@@ -7,7 +7,7 @@ from collections import Counter
 
 from whoosh.index import open_dir
 from whoosh.index import create_in
-from whoosh.analysis import StemmingAnalyzer, SpaceSeparatedTokenizer
+from whoosh.analysis import StemmingAnalyzer, SpaceSeparatedTokenizer, StandardAnalyzer
 from whoosh.fields import *
 from whoosh.qparser import *
 from whoosh.reading import TermNotFound
@@ -20,22 +20,34 @@ from whoosh import scoring
 # Customize parameters here:
 
 corpus_dir = os.path.join("..", "material", "rcv1")      # Directory of your rcv1 folder
-docs_to_index = 10000                # How many docs to add to index, set to None to add all of the docs in the corpus
+docs_to_index = 100000                # How many docs to add to index, set to None to add all of the docs in the corpus
+stemming = True
 
 #######################################################################################################################
 
 
 # By default, the writer will have 1GB (1024 MB) as the maximum memory for the indexing pool
 # However, the actual memory used will be higher than this value because of interpreter overhead (up to twice as much)
-def indexing(corpus, ram_limit=1024, d_test=True):  # TODO: allow analyzer customization with extra function arguments?
+def indexing(corpus, ram_limit=1024, d_test=True, stemmed=True):
     start_time = time.time()
 
-    schema = Schema(doc_id=NUMERIC(stored=True),
-                    date=TEXT(analyzer=SpaceSeparatedTokenizer()),
-                    headline=TEXT(field_boost=3.0, analyzer=StemmingAnalyzer()),
-                    dateline=TEXT(analyzer=StemmingAnalyzer()),
-                    byline=TEXT(analyzer=StemmingAnalyzer()),
-                    content=TEXT(analyzer=StemmingAnalyzer()))
+    global stemming
+    stemming = stemmed
+
+    if stemming:
+        schema = Schema(doc_id=NUMERIC(stored=True),
+                        date=TEXT(analyzer=SpaceSeparatedTokenizer()),
+                        headline=TEXT(field_boost=1.5, analyzer=StemmingAnalyzer()),
+                        dateline=TEXT(analyzer=StemmingAnalyzer()),
+                        byline=TEXT(analyzer=StemmingAnalyzer()),
+                        content=TEXT(analyzer=StemmingAnalyzer()))
+    else:
+        schema = Schema(doc_id=NUMERIC(stored=True),
+                        date=TEXT(analyzer=SpaceSeparatedTokenizer()),
+                        headline=TEXT(field_boost=1.5),
+                        dateline=TEXT(),
+                        byline=TEXT(),
+                        content=TEXT())
 
     index_dir = os.path.join("indexes", "docs")
 
@@ -52,7 +64,7 @@ def indexing(corpus, ram_limit=1024, d_test=True):  # TODO: allow analyzer custo
 
     end_time = time.time()
 
-    # Traverses all files in the indexdir folder to calculate disk space taken up by the index
+    # Traverses all files in the indexes/docs folder to calculate disk space taken up by the index
     space = 0
     for subdir, dirs, files in os.walk(index_dir):
         space += sum(os.stat(os.path.join(index_dir, file)).st_size for file in files)
@@ -74,7 +86,8 @@ def traverse_folders(writer, corpus, d_test):
             doc_id, date, headline, dateline, byline, content = extract_doc_content(os.path.join(corpus, subdir, file))
             writer.add_document(doc_id=doc_id, date=date, headline=headline,
                                 dateline=dateline, byline=byline, content=content)
-            if (n_docs := n_docs + 1) == docs_to_index:
+            n_docs += 1
+            if n_docs == docs_to_index:
                 return
 
 
@@ -106,7 +119,10 @@ def extract_topic_query(topic_id, index, k):
     norm_topics = remove_tags(topics)
     topic = norm_topics[topic_id]
 
-    schema = Schema(id=NUMERIC(stored=True), content=TEXT(analyzer=StemmingAnalyzer()))
+    if stemming:
+        schema = Schema(id=NUMERIC(stored=True), content=TEXT(analyzer=StemmingAnalyzer()))
+    else:
+        schema = Schema(id=NUMERIC(stored=True), content=TEXT())
 
     topic_index_dir = os.path.join("indexes", "aux_topic")
 
@@ -194,7 +210,12 @@ def ranking(topic_id, p, index, model="TF-IDF"):
         topics = f.read().split("</top>")[:-1]
     norm_topics = remove_tags(topics)
     topic = norm_topics[topic_id]
-    analyzer = StemmingAnalyzer()
+
+    if stemming:
+        analyzer = StemmingAnalyzer()
+    else:
+        analyzer = StandardAnalyzer()
+
     tokens = [token.text for token in analyzer(topic)]
     string_query = ' '.join(tokens)
     with index.searcher(weighting=weighting) as searcher:
@@ -229,7 +250,8 @@ def convert_filesize(size):
 
 
 def main():
-    ix, ix_time, ix_space = indexing(corpus_dir, 2048)
+    ix, ix_time, ix_space = indexing(corpus_dir, 2048, stemmed=True)
+    # ix, ix_time, ix_space = indexing(corpus_dir, 2048, stemmed=False)
     # ix, ix_time, ix_space = open_dir(os.path.join("indexes", "docs")), 0, 0
     # print("Whole index:"); print_index(ix)
     print(f"Time to build index: {round(ix_time, 3)}s")
