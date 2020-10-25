@@ -152,13 +152,6 @@ def evaluate_boolean(qrels, retrieved_docs, topics, path_to_csv):
         for i in range(len(topics)):
             file.write(f"{topics[i]},{precisions[i]},{recalls[i]},{f_betas[i]}\n")
 
-    print(retrieved_docs)
-    print(relevant_docs)
-    print(relevant_retrieved_docs)
-    print(precisions)
-    print(recalls)
-    print(f_betas)
-
 
 #######################################################################################################################
 
