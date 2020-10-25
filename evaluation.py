@@ -117,6 +117,8 @@ def plot_rp_curve(qrels, topics, runs_file, results, model):
         if row["rel"] > 0:
             relevant_docs[row["query"]].append(row["docid"])
 
+    num_relevant_docs = {doc_id: num for doc_id, num in ev.get_relevant_documents(per_query=True).iteritems()}
+
     # TrecTools' precision calculations are very slow, so they are calculated "directly"
     # Obtain the recall and precision @k values for every k up to 5k for each topic and plot them
     for i, topic in enumerate(topics):
@@ -134,7 +136,7 @@ def plot_rp_curve(qrels, topics, runs_file, results, model):
                 precisions_aux.append(precisions_aux[j])
 
         # Calculate precision and recall values based on the previous values
-        recalls = [x / ev.get_relevant_documents() for x in recalls_aux]
+        recalls = [x / num_relevant_docs[topic] for x in recalls_aux]
         precisions = [(x / i if i > 0 else 1) for i, x in enumerate(precisions_aux)]
 
         # Calculate f-beta measure (beta = 0.5)
