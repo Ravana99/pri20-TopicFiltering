@@ -245,29 +245,3 @@ def convert_filesize(size):
         size /= 1024.0
         i += 1
     return str(round(size, 3)) + " " + suffixes[i]
-
-
-def main():
-    ix, ix_time, ix_space = indexing(corpus_dir, 2048, stemmed=True)
-    # ix, ix_time, ix_space = indexing(corpus_dir, 2048, stemmed=False)
-    # ix, ix_time, ix_space = open_dir(os.path.join("indexes", "docs")), 0, 0
-    # print("Whole index:"); print_index(ix)
-    print(f"Time to build index: {round(ix_time, 3)}s")
-    print(f"Disk space taken up by the index: {convert_filesize(ix_space)}")
-
-    with ix.searcher() as searcher:
-        results = searcher.search(Every(), limit=None)  # Returns every document
-        print(f"Number of indexed docs: {len(results)}")
-
-    print("Boolean queries for topic 104 (k=3, 1 mismatch):")
-    print(boolean_query(104, 3, ix))
-
-    print("Ranked query (using TF-IDF) for topic 104 (p=20):")
-    print(ranking(104, 20, ix, "TF-IDF"))
-
-    print("Ranked query (using BM25) for topic 104 (p=20):")
-    print(ranking(104, 20, ix, "BM25"))
-
-
-if __name__ == "__main__":
-    main()
