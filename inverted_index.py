@@ -20,7 +20,7 @@ from whoosh import scoring
 # Customize parameters here:
 
 corpus_dir = os.path.join("..", "material", "rcv1")      # Directory of your rcv1 folder
-docs_to_index = 1000                # How many docs to add to index, set to None to add all of the docs in the corpus
+docs_to_index = 10000                # How many docs to add to index, set to None to add all of the docs in the corpus
 stemming = True
 
 #######################################################################################################################

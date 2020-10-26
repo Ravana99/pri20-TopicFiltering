@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 
 # Customize parameters here:
 
-k = 5
+k = 3
 p = 1000
 
 #######################################################################################################################
@@ -232,6 +232,8 @@ def plot_rp_curve(qrels, topics, runs_file, results, model):
 
         # Save plot in eval folder
         fig.savefig(os.path.join("eval", model, f"R{topic}.png"))
+
+        plt.close()
 
 
 #######################################################################################################################
