@@ -267,3 +267,7 @@ def main():
 
     print("Ranked query (using BM25) for topic 104 (p=20):")
     print(ranking(104, 20, ix, "BM25"))
+
+
+if __name__ == "__main__":
+    main()

@@ -244,3 +244,7 @@ def main():
 
     # 5 different topics with varying outcomes across the topics and the 3 kinds of system
     evaluation([104, 121, 138, 164, 185], os.path.join(corpus_dir, "..", "qrels.test"), ix)
+
+
+if __name__ == "__main__":
+    main()
