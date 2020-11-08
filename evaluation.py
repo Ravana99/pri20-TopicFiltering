@@ -234,3 +234,13 @@ def plot_rp_curve(qrels, topics, runs_file, results, model):
         fig.savefig(os.path.join("eval", model, f"R{topic}.png"))
 
         plt.close()
+
+
+def main():
+    # This assumes you have already created the index
+    # If you haven't, adjust the number of docs to index (10k+ recommended)
+    # and the corpus directory in inverted_index.py and run it
+    ix = open_dir(os.path.join("indexes", "docs"))
+
+    # 5 different topics with varying outcomes across the topics and the 3 kinds of system
+    evaluation([104, 121, 138, 164, 185], os.path.join(corpus_dir, "..", "qrels.test"), ix)
